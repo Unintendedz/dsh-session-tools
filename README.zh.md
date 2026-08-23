@@ -19,7 +19,7 @@
 ## 安装
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.0
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.1
 ```
 
 随后重启正在运行的 DSH Web 服务。插件只会在服务启动时装载。
@@ -35,7 +35,7 @@ dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.0
 安装目标版本标签，然后重启 DSH Web：
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.0
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.1
 ```
 
 ## 卸载

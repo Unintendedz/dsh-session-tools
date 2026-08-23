@@ -19,7 +19,7 @@ Archiving is persistent but non-destructive: the session disappears from normal 
 ## Install
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.0
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.1
 ```
 
 Restart the running DSH Web service. Plugins are loaded when the service starts.
@@ -35,7 +35,7 @@ The sidebar menu is repositioned after the copy action is injected, so all four 
 Install the desired tag, then restart DSH Web:
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.0
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.1
 ```
 
 ## Uninstall
