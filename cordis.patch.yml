@@ -1,0 +1,4 @@
+# Mount the Host tools and browser bundle into a DSH profile.
+- insert:
+    - id: dsh-session-tools
+      name: dsh-session-tools
