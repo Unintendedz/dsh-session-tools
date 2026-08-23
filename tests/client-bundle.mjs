@@ -39,7 +39,8 @@ async function loadBundle(navigator = {}, overrides = {}) {
       ...overrides.document,
     },
     Event,
-    console,
+    MutationObserver: overrides.MutationObserver,
+    console: overrides.console ?? console,
     setTimeout,
     clearTimeout,
   }
@@ -67,6 +68,83 @@ function fakeElement() {
     addEventListener() {},
     replaceChildren() {},
   }
+}
+
+function actionElement(tagName = 'span') {
+  const attributes = new Map()
+  const listeners = new Map()
+  const classes = new Set()
+  const element = {
+    tagName: tagName.toUpperCase(),
+    children: [],
+    parentElement: null,
+    dataset: {},
+    style: {},
+    disabled: false,
+    classList: {
+      add(...names) { for (const name of names) classes.add(name) },
+      contains(name) { return classes.has(name) },
+    },
+    setAttribute(name, value) { attributes.set(name, String(value)) },
+    getAttribute(name) { return attributes.get(name) ?? null },
+    hasAttribute(name) { return attributes.has(name) },
+    appendChild(child) { child.parentElement = element; element.children.push(child); return child },
+    append(...children) { for (const child of children) element.appendChild(child) },
+    replaceChildren(...children) {
+      for (const child of element.children) child.parentElement = null
+      element.children = []
+      element.append(...children)
+    },
+    insertBefore(child, before) {
+      child.parentElement = element
+      const index = before === null ? -1 : element.children.indexOf(before)
+      if (index === -1) element.children.push(child)
+      else element.children.splice(index, 0, child)
+      return child
+    },
+    addEventListener(type, listener) { listeners.set(type, listener) },
+    querySelector(selector) {
+      const matches = (candidate) => {
+        if (selector === 'button') return candidate.tagName === 'BUTTON'
+        if (selector === '[data-dsh-session-tools-actions]') {
+          return candidate.hasAttribute('data-dsh-session-tools-actions')
+        }
+        return false
+      }
+      const visit = (candidate) => {
+        if (matches(candidate)) return candidate
+        for (const child of candidate.children) {
+          const found = visit(child)
+          if (found !== null) return found
+        }
+        return null
+      }
+      for (const child of element.children) {
+        const found = visit(child)
+        if (found !== null) return found
+      }
+      return null
+    },
+    async dispatch(type) {
+      const event = {
+        defaultPrevented: false,
+        propagationStopped: false,
+        preventDefault() { this.defaultPrevented = true },
+        stopPropagation() { this.propagationStopped = true },
+      }
+      await listeners.get(type)?.(event)
+      return event
+    },
+  }
+  Object.defineProperty(element, 'firstChild', { get: () => element.children[0] ?? null })
+  Object.defineProperty(element, 'previousElementSibling', {
+    get: () => {
+      if (element.parentElement === null) return null
+      const index = element.parentElement.children.indexOf(element)
+      return index > 0 ? element.parentElement.children[index - 1] : null
+    },
+  })
+  return element
 }
 
 test('browser bundle contributes one localized session-header copy-ID utility', async () => {
@@ -103,6 +181,326 @@ test('clipboard helper reports success only after the exact session id is accept
 
   const denied = await loadBundle({ clipboard: { async writeText() { throw new Error('denied') } } })
   assert.equal(await denied.exports.writeClipboard('session-other'), false)
+})
+
+test('pinned session order keeps pins first without disturbing the remaining sessions', async () => {
+  const { exports } = await loadBundle()
+  assert.equal(typeof exports.pinnedSessionOrder, 'function')
+  assert.deepEqual(
+    Array.from(exports.pinnedSessionOrder(
+      ['session-a', 'session-b', 'session-c', 'session-d'],
+      ['session-d', 'session-b', 'session-missing'],
+    )),
+    ['session-d', 'session-b', 'session-a', 'session-c'],
+  )
+})
+
+test('session row context resolves native archive and ordering actions from its React owners', async () => {
+  const { exports } = await loadBundle()
+  assert.equal(typeof exports.sessionContextFromElement, 'function')
+
+  const archived = []
+  const reordered = []
+  const archiveSession = async sessionId => { archived.push(sessionId) }
+  const setSessionOrder = (accountKey, order) => { reordered.push({ accountKey, order }) }
+  const element = {}
+  Object.defineProperty(element, '__reactFiber$test', {
+    value: {
+      memoizedProps: {},
+      return: {
+        memoizedProps: {
+          node: { id: 'session-row', title: 'Pinned row' },
+          onArchive() {},
+        },
+        return: {
+          memoizedProps: {
+            sessionOrderByAccount: { 'workspace-1': ['session-other', 'session-row'] },
+            setSessionOrder,
+            workspaces: [{ workspaceId: 'workspace-1', sessionIds: ['session-other', 'session-row'] }],
+          },
+          return: {
+            memoizedProps: { archiveSession },
+            return: null,
+          },
+        },
+      },
+    },
+  })
+
+  const context = exports.sessionContextFromElement(element)
+  assert.equal(context.sessionId, 'session-row')
+  assert.equal(context.title, 'Pinned row')
+  assert.equal(context.accountKey, 'workspace-1')
+  await context.archiveSession(context.sessionId)
+  context.setSessionOrder(context.accountKey, ['session-row', 'session-other'])
+  assert.deepEqual(archived, ['session-row'])
+  assert.deepEqual(reordered, [{
+    accountKey: 'workspace-1',
+    order: ['session-row', 'session-other'],
+  }])
+
+  const flatElement = {}
+  Object.defineProperty(flatElement, '__reactFiber$test', {
+    value: {
+      memoizedProps: { node: { id: 'session-flat', title: 'Flat row' } },
+      return: {
+        memoizedProps: {
+          sessionOrderByAccount: { '__flat_session_order__': ['session-flat'] },
+          setSessionOrder,
+        },
+        return: { memoizedProps: { archiveSession }, return: null },
+      },
+    },
+  })
+  assert.equal(exports.sessionContextFromElement(flatElement).accountKey, '__flat_session_order__')
+})
+
+test('pin persistence sanitizes stored ids and reports denied writes', async () => {
+  const { exports } = await loadBundle()
+  assert.equal(typeof exports.readPinnedSessionIds, 'function')
+  assert.equal(typeof exports.writePinnedSessionIds, 'function')
+
+  const storage = {
+    value: JSON.stringify(['session-b', '', 'session-b', 42, 'session-a']),
+    getItem() { return this.value },
+    setItem(_key, value) { this.value = value },
+  }
+  assert.deepEqual(Array.from(exports.readPinnedSessionIds(storage)), ['session-b', 'session-a'])
+  assert.equal(exports.writePinnedSessionIds(storage, ['session-a']), true)
+  assert.deepEqual(JSON.parse(storage.value), ['session-a'])
+
+  const corrupt = { getItem() { return '{' } }
+  assert.deepEqual(Array.from(exports.readPinnedSessionIds(corrupt)), [])
+  const denied = { setItem() { throw new Error('denied') } }
+  assert.equal(exports.writePinnedSessionIds(denied, ['session-a']), false)
+})
+
+test('pin sync writes the DSH order once and becomes a no-op when already sorted', async () => {
+  const { exports } = await loadBundle()
+  assert.equal(typeof exports.syncPinnedSessionOrder, 'function')
+
+  const writes = []
+  const context = {
+    accountKey: 'workspace-1',
+    sessionOrderByAccount: {
+      'workspace-1': ['session-a', 'session-b', 'session-c'],
+    },
+    setSessionOrder(accountKey, order) { writes.push({ accountKey, order: Array.from(order) }) },
+  }
+  assert.equal(exports.syncPinnedSessionOrder(context, ['session-b']), true)
+  assert.deepEqual(writes, [{
+    accountKey: 'workspace-1',
+    order: ['session-b', 'session-a', 'session-c'],
+  }])
+
+  context.sessionOrderByAccount['workspace-1'] = writes[0].order
+  assert.equal(exports.syncPinnedSessionOrder(context, ['session-b']), false)
+  assert.equal(writes.length, 1)
+})
+
+test('session quick actions expose accessible pin state and call native archive without opening the row', async () => {
+  const { exports } = await loadBundle({}, {
+    document: {
+      createElement: tag => actionElement(tag),
+      createElementNS: (_namespace, tag) => actionElement(tag),
+    },
+  })
+  assert.equal(typeof exports.mountSessionQuickActions, 'function')
+
+  const row = actionElement('div')
+  const time = actionElement('span')
+  const actionHost = actionElement('span')
+  const menuRoot = actionElement('span')
+  menuRoot.appendChild(actionElement('button'))
+  actionHost.appendChild(menuRoot)
+  row.append(time, actionHost)
+
+  const toggled = []
+  const archived = []
+  const context = {
+    sessionId: 'session-row',
+    title: 'Pinned row',
+    async archiveSession(sessionId) { archived.push(sessionId) },
+  }
+  const t = (key, params = {}) => `${key}:${params.title ?? ''}`
+  assert.equal(exports.mountSessionQuickActions(
+    row,
+    context,
+    ['session-row'],
+    t,
+    sessionId => { toggled.push(sessionId) },
+  ), true)
+
+  const actions = row.querySelector('[data-dsh-session-tools-actions]')
+  assert.ok(actions)
+  assert.equal(actions.children.length, 2)
+  const [pin, archive] = actions.children
+  assert.equal(pin.getAttribute('aria-pressed'), 'true')
+  assert.equal(pin.getAttribute('aria-label'), 'unpin.aria:Pinned row')
+  assert.equal(archive.getAttribute('aria-label'), 'archive.aria:Pinned row')
+  assert.equal(actionHost.classList.contains('dsh-session-tools-row-actions-host'), true)
+  assert.equal(time.classList.contains('dsh-session-tools-row-time'), true)
+
+  const pinEvent = await pin.dispatch('click')
+  const archiveEvent = await archive.dispatch('click')
+  assert.equal(pinEvent.defaultPrevented, true)
+  assert.equal(pinEvent.propagationStopped, true)
+  assert.equal(archiveEvent.defaultPrevented, true)
+  assert.equal(archiveEvent.propagationStopped, true)
+  assert.deepEqual(toggled, ['session-row'])
+  assert.deepEqual(archived, ['session-row'])
+})
+
+test('quick action refresh is mutation-free when state is unchanged and updates renamed rows', async () => {
+  const { exports } = await loadBundle({}, {
+    document: {
+      createElement: tag => actionElement(tag),
+      createElementNS: (_namespace, tag) => actionElement(tag),
+    },
+  })
+  const row = actionElement('div')
+  const actionHost = actionElement('span')
+  const menuRoot = actionElement('span')
+  menuRoot.appendChild(actionElement('button'))
+  actionHost.appendChild(menuRoot)
+  row.append(actionElement('span'), actionHost)
+  const t = (key, params = {}) => `${key}:${params.title ?? ''}`
+  const context = {
+    sessionId: 'session-row',
+    title: 'Draft title',
+    async archiveSession() {},
+  }
+
+  exports.mountSessionQuickActions(row, context, [], t, () => {})
+  const actions = row.querySelector('[data-dsh-session-tools-actions]')
+  const [pin, archive] = actions.children
+  const originalPinIcon = pin.children[0]
+
+  exports.mountSessionQuickActions(
+    row,
+    { ...context, title: 'Final title' },
+    [],
+    t,
+    () => {},
+  )
+
+  assert.equal(pin.children[0], originalPinIcon)
+  assert.equal(row.dataset.dshSessionToolsPinned, 'false')
+  assert.equal(pin.getAttribute('aria-label'), 'pin.aria:Final title')
+  assert.equal(archive.getAttribute('aria-label'), 'archive.aria:Final title')
+  assert.equal(archive.getAttribute('title'), 'archive.aria:Final title')
+})
+
+test('failed quick archive restores the button and exposes a recoverable error state', async () => {
+  const warnings = []
+  const { exports } = await loadBundle({}, {
+    console: { warn(...args) { warnings.push(args) } },
+    document: {
+      createElement: tag => actionElement(tag),
+      createElementNS: (_namespace, tag) => actionElement(tag),
+    },
+  })
+  const row = actionElement('div')
+  const actionHost = actionElement('span')
+  const menuRoot = actionElement('span')
+  menuRoot.appendChild(actionElement('button'))
+  actionHost.appendChild(menuRoot)
+  row.append(actionElement('span'), actionHost)
+  const context = {
+    sessionId: 'session-row',
+    title: 'Archive failure',
+    async archiveSession() { throw new Error('offline') },
+  }
+  exports.mountSessionQuickActions(
+    row,
+    context,
+    [],
+    key => key,
+    () => {},
+  )
+
+  const archive = row.querySelector('[data-dsh-session-tools-actions]').children[1]
+  await archive.dispatch('click')
+
+  assert.equal(archive.disabled, false)
+  assert.equal(archive.dataset.status, 'failed')
+  assert.equal(archive.getAttribute('title'), 'archive.failed')
+  assert.equal(warnings.length, 1)
+})
+
+test('browser apply restores pinned rows, mounts quick actions, and watches React list updates', async () => {
+  const row = actionElement('div')
+  const time = actionElement('span')
+  const actionHost = actionElement('span')
+  const menuRoot = actionElement('span')
+  menuRoot.appendChild(actionElement('button'))
+  actionHost.appendChild(menuRoot)
+  row.append(time, actionHost)
+
+  const writes = []
+  const setSessionOrder = (accountKey, order) => {
+    writes.push({ accountKey, order: Array.from(order) })
+  }
+  Object.defineProperty(row, '__reactFiber$test', {
+    value: {
+      memoizedProps: {},
+      return: {
+        memoizedProps: { node: { id: 'session-row', title: 'Pinned row' }, onArchive() {} },
+        return: {
+          memoizedProps: {
+            sessionOrderByAccount: { 'workspace-1': ['session-other', 'session-row'] },
+            setSessionOrder,
+            workspaces: [{ workspaceId: 'workspace-1', sessionIds: ['session-other', 'session-row'] }],
+          },
+          return: { memoizedProps: { async archiveSession() {} }, return: null },
+        },
+      },
+    },
+  })
+
+  let observed = false
+  class FakeMutationObserver {
+    constructor(callback) { this.callback = callback }
+    observe() { observed = true }
+    disconnect() {}
+  }
+  const storage = {
+    getItem() { return JSON.stringify(['session-row']) },
+    setItem() {},
+  }
+  const { exports } = await loadBundle({}, {
+    window: {
+      localStorage: storage,
+      addEventListener() {},
+      removeEventListener() {},
+    },
+    document: {
+      querySelectorAll(selector) { return selector === '[role="treeitem"]' ? [row] : [] },
+      createElement: tag => actionElement(tag),
+      createElementNS: (_namespace, tag) => actionElement(tag),
+    },
+    MutationObserver: FakeMutationObserver,
+  })
+  const ctx = {
+    effect(start) { return start() },
+    locale: {
+      bind() { return (key, params = {}) => `${key}:${params.title ?? ''}` },
+      register() { return () => {} },
+    },
+    slots: {
+      inject(_name, mount) { return mount() },
+      register() { return () => {} },
+    },
+  }
+
+  exports.apply(ctx)
+
+  assert.ok(row.querySelector('[data-dsh-session-tools-actions]'))
+  assert.deepEqual(writes, [{
+    accountKey: 'workspace-1',
+    order: ['session-row', 'session-other'],
+  }])
+  assert.equal(observed, true)
 })
 
 test('browser bundle watches session-row action buttons and resolves their exact React-owned id', async () => {
