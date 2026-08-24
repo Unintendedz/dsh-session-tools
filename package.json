@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-tools",
-  "version": "0.1.1",
-  "description": "Session archive, cross-session read, and copy-ID tools for DeepSeek Harness",
+  "version": "0.2.0",
+  "description": "Session archive, cross-session read, message, wait, and copy-ID tools for DeepSeek Harness",
   "main": "lib/index.js",
   "scripts": {
     "test": "npm run build && node --test tests/*.mjs",

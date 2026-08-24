@@ -6,10 +6,14 @@ A DSH Web plugin for session management across conversations:
 
 - `session_archive`: archive the calling session, or another session by exact ID.
 - `session_read`: read DSH's bounded, untrusted text snapshot of another session by exact ID.
+- `session_send`: send a message to another ordinary session and receive a durable request ID.
+- `session_wait`: wait for, or poll, the exact reply associated with a `session_send` request.
 - `Copy session ID` in every populated session row's three-dot menu.
 - `ID` header button: copy the exact ID of the currently open session.
 
-Archiving is persistent but non-destructive: the session disappears from normal lists while its log remains stored. Cross-session reads reuse DSH's session-reference projection, so tool traces and model reasoning are not exposed and each reference keeps the host's configured byte limit.
+`session_send` places one durable user message in the target's next ordinary turn. DSH's native agent resolver can resume an inactive ordinary session with its recorded context before delivery. `session_wait` correlates the request ID with that exact target turn and returns only its visible assistant text; it does not expose reasoning or tool traces.
+
+Archiving is persistent but non-destructive: the session disappears from normal lists while its log remains stored. Cross-session reads reuse DSH's session-reference projection, so each reference keeps the host's configured byte limit.
 
 ## Requirements
 
@@ -19,14 +23,37 @@ Archiving is persistent but non-destructive: the session disappears from normal 
 ## Install
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.1
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.0
 ```
 
 Restart the running DSH Web service. Plugins are loaded when the service starts.
 
 ## Usage
 
-Use **Copy session ID** in a row's three-dot menu, or open a session and click **ID** in its header. Paste that ID into another conversation and ask it to call `session_read`, or ask it to call `session_archive` with that ID. Calling `session_archive` without `session_id` archives the current conversation.
+Use **Copy session ID** in a row's three-dot menu, or open a session and click **ID** in its header.
+
+To ask another ordinary session to do work, call `session_send`:
+
+```json
+{
+  "session_id": "session-target-id",
+  "message": "Check the test results and summarize any failures."
+}
+```
+
+The tool returns immediately with a `request_id`. Pass both IDs to `session_wait`:
+
+```json
+{
+  "session_id": "session-target-id",
+  "request_id": "request-id-from-session-send",
+  "timeout_seconds": 60
+}
+```
+
+`session_wait` returns `completed`, `running`, or `failed`. Its wait defaults to 60 seconds and accepts 0–600 seconds; use `0` to poll. A `running` result is safe to wait on again with the same IDs because waiting never resends the message or cancels the target.
+
+You can also paste a copied ID into another conversation and ask it to call `session_read`, or ask it to call `session_archive` with that ID. Calling `session_archive` without `session_id` archives the current conversation.
 
 The sidebar menu is repositioned after the copy action is injected, so all four rows remain inside the viewport even when the source conversation is near the bottom of the screen.
 
@@ -35,7 +62,7 @@ The sidebar menu is repositioned after the copy action is injected, so all four 
 Install the desired tag, then restart DSH Web:
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.1.1
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.0
 ```
 
 ## Uninstall
@@ -47,9 +74,12 @@ dsh plugin --profile web remove dsh-session-tools
 ## Safety
 
 - `session_read` uses DSH's native session-reference resolver. Returned text is bounded by the host and explicitly treated as untrusted context.
-- Tool traces and model reasoning are excluded from cross-session snapshots.
+- `session_send` and `session_wait` require two different ordinary sessions. Self-targeting is rejected; subagent sessions must use DSH's built-in `send_message` tool.
+- Only the session that created a request may wait for its result.
+- `session_wait` returns only visible assistant text from the request's exact turn. Reasoning and tool traces are excluded, and returned UTF-8 text is bounded to 65,536 bytes.
+- A wait timeout returns `running`; it does not resend the request or cancel the target. Cross-session wait cycles are rejected.
 - `session_archive` preserves the session log; it does not delete conversation data.
-- Tool arguments accept only an exact, non-empty `session_id` and reject unknown fields.
+- Tool arguments require exact, non-empty IDs and reject unknown fields.
 
 ## Development
 
