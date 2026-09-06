@@ -23,7 +23,7 @@
 ## 安装
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.0
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
 ```
 
 随后重启正在运行的 DSH Web 服务。插件只会在服务启动时装载。
@@ -62,7 +62,7 @@ dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.0
 安装目标版本标签，然后重启 DSH Web：
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.0
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
 ```
 
 ## 卸载
@@ -89,3 +89,7 @@ npm test
 ```
 
 宿主入口是 `lib/index.js`，浏览器源码位于 `src/client.jsx`。`npm test` 会重新构建 `lib/client.js`，然后运行宿主与浏览器包测试。
+
+## 请求生命周期与原生输出
+
+`session_wait` 会将 inbox 领取记录关联到当前轮次。如果该轮次在用户消息写入前被取消、报错或阻止，等待会返回 `failed` 及相应原因。轮次仍在执行时，已领取的请求继续返回 `running`；请求所有权和排队请求的取消检查仍然有效。原生工具输出始终包含请求状态及终态原因，然后附上最多 64 KiB UTF-8 的已有回复文本，因此部分回复也会明确显示失败或运行中状态。

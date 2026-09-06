@@ -618,3 +618,42 @@ test('tool executors reject missing, blank, and unknown arguments before changin
   assert.deepEqual(archived, [])
   assert.deepEqual(prepared, [])
 })
+
+for (const kind of ['aborted', 'error', 'blocked']) {
+  test(`session_wait recognizes ${kind} after claim but before user/message`, async () => {
+    const request = relay(`claimed-${kind}`, 'session-sender')
+    const target = {
+      id: 'session-target', status: 'running',
+      session: { header: {}, events: [
+        { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, inserted: [request] } },
+        { type: 'turn/start', data: { turn: 9 } },
+        { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [] } },
+      ] },
+      inbox: { nextTurn: [], nextStep: [] },
+    }
+    const environment = setup(new Map([[target.id, target]]))
+    const tool = environment.byName('session_wait')
+    const args = { session_id: target.id, request_id: request.id, timeout_seconds: 0 }
+    assert.equal((await tool.execute(args, execution('session-sender'))).status, 'running')
+    await assert.rejects(() => tool.execute(args, execution('session-intruder')), /another session/)
+    const waiting = tool.execute({ ...args, timeout_seconds: 1 }, execution('session-sender'))
+    await new Promise(resolve => setImmediate(resolve))
+    environment.emit(target.session, { type: 'turn/end', data: { turn: 9, reason: { kind } } })
+    target.status = 'idle'
+    assert.deepEqual(await waiting, {
+      session_id: target.id, request_id: request.id, status: 'failed', content: '', reason: kind,
+    })
+  })
+}
+
+test('native session_wait output preserves status, failure reason and partial reply', () => {
+  const tool = setup().byName('session_wait')
+  for (const [status, reason] of [['completed', 'completed'], ['failed', 'aborted'], ['failed', 'error'], ['running', undefined]]) {
+    const rendered = tool.output.render({}, {
+      session_id: 'session-target', request_id: 'request-partial', status, reason, content: 'Synthetic partial reply.',
+    }).map(block => block.text).join('')
+    assert.ok(rendered.includes(status))
+    if (reason) assert.ok(rendered.includes(reason))
+    assert.ok(rendered.includes('Synthetic partial reply.'))
+  }
+})

@@ -23,7 +23,7 @@ Archiving is persistent but non-destructive: the session disappears from normal 
 ## Install
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.0
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
 ```
 
 Restart the running DSH Web service. Plugins are loaded when the service starts.
@@ -62,7 +62,7 @@ The sidebar menu is repositioned after the copy action is injected, so all four 
 Install the desired tag, then restart DSH Web:
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.0
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
 ```
 
 ## Uninstall
@@ -89,3 +89,7 @@ npm test
 ```
 
 The host entry point is `lib/index.js`; browser source lives in `src/client.jsx`. `npm test` rebuilds `lib/client.js` and runs the host and browser-bundle tests.
+
+## Request lifecycle and native output
+
+`session_wait` associates an inbox claim with its active turn. If that turn is aborted, errors, or is blocked before the user message is recorded, waiting returns `failed` with that reason. A claim whose turn is still active remains `running`; ownership and queued-request cancellation checks still apply. Native tool output always includes the request status and any terminal reason, followed by the available reply text bounded to 64 KiB of UTF-8. A partial reply therefore remains visibly failed or running.
