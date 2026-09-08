@@ -17,13 +17,15 @@
 
 ## 要求
 
-- DSH `0.1.1-rc.2`
+- DSH `0.1.1-rc.2` / `0.1.2-rc.1`
 - Web profile（下面以 `web` 为例）
+
+`0.2.2` 在 DSH `0.1.2-rc.1` 上读取实时事件快照，同时保留 DSH `0.1.1-rc.2` 的旧事件数组读取方式。每次轮询均能获取新提交的回复和终态，不会复用旧快照。
 
 ## 安装
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.2
 ```
 
 随后重启正在运行的 DSH Web 服务。插件只会在服务启动时装载。
@@ -62,7 +64,7 @@ dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
 安装目标版本标签，然后重启 DSH Web：
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.2
 ```
 
 ## 卸载
@@ -87,6 +89,8 @@ dsh plugin --profile web remove dsh-session-tools
 npm install
 npm test
 ```
+
+将 `DSH_NATIVE_ROOT` 指向已安装的 DSH 包根目录（包含其 `node_modules` 的目录），并设置全新临时 `DSH_HOME`，即可运行真实 Session 轮询回归测试。它使用合成数据，不启动 profile。
 
 宿主入口是 `lib/index.js`，浏览器源码位于 `src/client.jsx`。`npm test` 会重新构建 `lib/client.js`，然后运行宿主与浏览器包测试。
 

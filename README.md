@@ -17,13 +17,15 @@ Archiving is persistent but non-destructive: the session disappears from normal 
 
 ## Requirements
 
-- DSH `0.1.1-rc.2`
+- DSH `0.1.1-rc.2` / `0.1.2-rc.1`
 - A Web profile (`web` in the examples below)
+
+Version `0.2.2` reads live event snapshots on DSH `0.1.2-rc.1` and retains the legacy event-array path for DSH `0.1.1-rc.2`. Polling sees newly committed replies and terminal status without reusing an older snapshot.
 
 ## Install
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.2
 ```
 
 Restart the running DSH Web service. Plugins are loaded when the service starts.
@@ -62,7 +64,7 @@ The sidebar menu is repositioned after the copy action is injected, so all four 
 Install the desired tag, then restart DSH Web:
 
 ```sh
-dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.1
+dsh plugin --profile web add github:Unintendedz/dsh-session-tools#v0.2.2
 ```
 
 ## Uninstall
@@ -87,6 +89,8 @@ dsh plugin --profile web remove dsh-session-tools
 npm install
 npm test
 ```
+
+Set `DSH_NATIVE_ROOT` to the installed DSH package root containing its `node_modules`, and use a fresh temporary `DSH_HOME`, to include the native Session polling regression. It uses synthetic data and does not boot a profile.
 
 The host entry point is `lib/index.js`; browser source lives in `src/client.jsx`. `npm test` rebuilds `lib/client.js` and runs the host and browser-bundle tests.
 

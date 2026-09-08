@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { pathToFileURL } from 'node:url'
 
 import { apply, inject } from '../lib/index.js'
 
@@ -75,6 +76,32 @@ function relay(id, senderSessionId) {
     },
   }
 }
+
+test('session_wait reads the current snapshot of a DSH 0.1.2 Session', {
+  skip: !process.env.DSH_NATIVE_ROOT && 'set DSH_NATIVE_ROOT for native Session integration',
+}, async () => {
+  const { Session } = await import(pathToFileURL(`${process.env.DSH_NATIVE_ROOT}/node_modules/@deepseek-ai/dsh-session/lib/index.js`))
+  const session = new Session('session-native-snapshot')
+  session.append('turn/start', { turn: 1 })
+  session.append('step/start', { turn: 1, step: 1 })
+  session.append('user/message', relay('request-native', 'session-sender'), { surfaceOp: 'append' })
+  const target = { id: session.id, session, status: 'running', inbox: { nextTurn: [], nextStep: [] } }
+  const { byName } = setup(new Map([[target.id, target]]))
+  const args = { session_id: target.id, request_id: 'request-native', timeout_seconds: 0 }
+  const pending = await byName('session_wait').execute(args, execution('session-sender'))
+  assert.equal(pending.status, 'running')
+  assert.equal(pending.content, '')
+  session.append('assistant/message', { turn: 1, step: 1, message: {
+    id: 'native-answer', role: 'assistant', source: { kind: 'model', provider: 'synthetic', model: 'test' },
+    content: [{ type: 'text', text: 'Synthetic native reply.' }],
+  } }, { surfaceOp: 'append', sourceEventSeqs: [] })
+  session.append('step/end', { turn: 1, step: 1 })
+  session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+  assert.deepEqual(await byName('session_wait').execute(args, execution('session-sender')), {
+    session_id: target.id, request_id: 'request-native', status: 'completed',
+    reason: 'completed', content: 'Synthetic native reply.',
+  })
+})
 
 test('registers send and wait beside the existing globally available session tools', () => {
   const { byName } = setup()
